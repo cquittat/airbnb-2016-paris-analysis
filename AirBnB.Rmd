@@ -1,0 +1,340 @@
+---
+title: "2016 AirBnB Paris Project"
+author: "Camille QUITTAT"
+date: "18/03/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# An analysis of the 2016 AirBnb data in Paris
+
+In this document we are going to explore the AirBnb data from 2016 in Paris.
+We will focus on :
+*Relationships between prices and apartments features
+*Relationships between prices and quarters of Paris
+*The number of apartments for each owner
+*Visit frequency of the different quarters according to time.
+
+```{r}
+rm(list=ls())
+```
+###Loading the different libraries
+
+```{r}
+#install.packages("priceR")
+#install.packages(ggplot2)
+#install.packages(dplyr)
+#install.packages("maps")
+#install.packages(shiny)
+#install.packages(stringr)
+library(priceR)
+library(ggplot2)
+library(dplyr)
+library(maps)
+library(shiny)
+library(stringr)
+```
+###Loading the datasets
+```{r}
+load('AirBnB.Rdata')
+```
+##dropped columns : 
+
+**The dataset is very large and we won't need all the columns, here are the columns that are unuseful for our calculations :**
+listing_url  
+scrape_id  
+last_scraped  
+experiences_offered (all the values are "none")  
+neighborhood_overview (too much NAs in this one)  
+notes  
+transit  
+access  
+interaction  
+house_rules  
+thumbnail_url  
+medium_url  
+picture_url  
+xl_picture_url  
+host_url  
+host_name  
+host location  
+host_about  
+host_response_time  
+host_response_rate  
+host_acceptance_rate  
+host_thumbnail_url  
+host_picture_url  
+host_neighborhood  
+host_listings_count (dropped because the calculated_host_listings_count seems better = no NA's, no 0 Values)  
+host_total_listings_count (because all the values are equal to the host_listings_count column)  
+host_verifications  
+host_has_profile_picture  
+host_identity_verified  
+street  
+neighboorhood (the neighbourhood_cleansed columns seems much better = cleansed names and no NAs)  
+neighbourhood_group__cleansed (=> )there's nothing into this one)  
+city (=> )just the name of the department)  
+state (the data of this one is not very clear, some names are clearly errors)  
+market  
+smart_location  
+country_code (all in France, only one in Switzerland and it's obviously an error)  
+country (idem)  
+square feet (too much NA, even when trying to catch it on the texts I still have a majority of it (and it would be difficult because some mentions are in m² and other in square_feet, so I decided to drop this column too)  
+weekly_price  
+monthly_price (price data will be sufficient)  
+security_deposit  
+cleaning_fee  
+guests_included  
+extra_people  
+maximum_nights  
+calendar_updated  
+has_availability  
+availability_30  
+availability_60  
+availability_90  
+availability_365  
+calendar_last_scraped  
+number_of_reviews  
+first_review  
+last_review  
+review_scores_rating  
+review_scores_accuracy  
+review_scores_cleanliness  
+review_scores_checkin  
+review_scores_communication  
+review_scores_location  
+review_scores_value  
+requires_license (all false)  
+license (all empty except one)  
+jurisdiction_names (all "Paris")  
+instant_bookable  
+require_guest_profile_picture (nearly all false)  
+require_guest_phone_verification (nearly all false)  
+is_location exact (not important, it just means that the location is accurate to within 150 meters.  
+                    [link]source : http://insideairbnb.com/about.html#disclaimers
+
+For the price column there are only two rows with 0,00 $, it's not possible to deduce the price with the weekly and monthly columns, so we will filter them
+
+#Selection on the data set :
+```{r}
+
+price_data <- filter(select (L,c(id,
+                          name,
+                          summary,
+                          space,
+                          description,
+                          host_id,
+                          host_is_superhost,
+                          neighbourhood_cleansed,
+                          zipcode,
+                          latitude,
+                          longitude,
+                          property_type,
+                          room_type,
+                          accommodates,
+                          bathrooms,
+                          bedrooms,
+                          beds,
+                          bed_type,
+                          amenities,
+                          price,
+                          minimum_nights,
+                          cancellation_policy,
+                          calculated_host_listings_count,
+                          reviews_per_month)
+                      ),price != "$0.00")
+```
+
+
+#Cleaning of the data :
+
+Then we replace all the values that have only spaces in the cells by NAs for a better visualization, and we convert the character columns in UTF8 :
+```{r}
+price_data[price_data == "" | price_data == " " | price_data == "{}"] <- NA  # Replace blank, space and '{}' in $amenities by NA
+
+for (col in colnames(select(price_data,name,summary,space,description,neighbourhood_cleansed))){
+  price_data[[col]] <- as.character(price_data[[col]])
+  Encoding(price_data[[col]]) <- "UTF-8"}
+```
+
+
+Here we convert the price column to numeric to be able to do calculations and statistics :
+```{r}
+price_data$price = currency_to_numeric(price_data$price)
+#NA verification
+sum(is.na(price_data$price))
+```
+#Starting to plot :
+
+Here we plot the histogram and boxplot of the prices column, we can clearly see that some prices are way beyond all other, mainly over 1500$ :
+```{r}
+par(mfrow=c(2,1))
+hist(price_data$price,breaks=50, main='$price histogram')
+boxplot(price_data$price,horizontal = TRUE)
+```
+
+Here we can see that only 21 rows are above 1500$, but it seems logic since they are located in upscale neighborhoods and are mostly entire homes, even villas for some. But for a better vision we are going to suppress them
+
+Re-filtering the data set to suppress the outliers :
+```{r}
+price_data <- filter(price_data,price < 1500)
+```
+
+plotting of the prices with a histogram and a density function, here we can clearly see that the great majority of the renting prices are between 0 and 250 :
+```{r}
+ggplot(data = price_data) + 
+  geom_histogram(aes(x = price, y = ..density..),
+                 bins = 100,fill = 'cyan1') +
+  geom_density(aes(x = price),col='blue4')
+```
+Here we compare the number of accommodates and the price, not surprisingly the number of accommodates seems to be correlated to the price :
+```{r}
+ggplot(data = price_data) +
+  geom_point(aes(x = accommodates, y = price)) +
+  geom_smooth(mapping = aes(x = accommodates, y = price),method = 'lm')
+```
+We can see it's the same with the number of bathrooms :
+```{r}
+ggplot(data = price_data) +
+  geom_point(aes(x = bathrooms, y = price)) +
+  geom_smooth(mapping = aes(x = bathrooms, y = price),method = 'lm')
+```
+Here we plot the relation between bedrooms and prices, with the differentiation between the type of bed. As we can see the real beds are in majority and the other types seems to occur only in the apartments with fewer beds (probably those have less rooms) :
+```{r}
+ggplot(data = price_data) +
+  geom_point(aes(x=bedrooms , y = price, col=bed_type)) +
+  facet_wrap( ~ bed_type, nrow = 2) +
+  geom_smooth(mapping = aes(x = bedrooms, y = price),method = 'lm')
+```
+This plot confirms the precedent results : Real Beds are in majority and the other types appear only in appartments with fewer rooms :
+```{r}
+ggplot(data = price_data) +
+  geom_bar(aes(x=factor(bedrooms),fill=factor(bed_type)))
+```
+Here we plot the different property types in function of the room type. AS we can see, the apartments are in vast majority, which is not surprising for a very urban city like Paris. We can alo see the Entire home are the most common.
+```{r}
+price_data %>%
+filter(is.na(property_type) == FALSE) %>%
+ggplot() +
+  geom_bar(aes(x=factor(room_type),fill=factor(property_type)))
+
+```
+Here is an histogram for the minimum nights (we filtered the minimum under 15, the others seemed irrelevant, like default values or similar)
+```{r}
+filter (price_data, minimum_nights < 15) %>%
+ggplot() +
+  geom_histogram(aes(minimum_nights),bins = 10, fill = 'blue', na.rm = TRUE, colour = "pink")
+```
+
+
+Here we plot the minimum night according to the price, the effect seems very limited, but the price grows a little with the minimum nights :
+```{r}
+
+filter (price_data, minimum_nights < 30) %>%
+ggplot() +
+  geom_point(aes(x = minimum_nights, y = price), colour = "blue") +
+  geom_smooth(mapping = aes(x = minimum_nights, y = price),method = 'lm', color = "red")
+```
+Here are two plots about the revews per month, we can see the majority is below 5 reviews per month. It does not seem to have an evident effect on the price however:
+```{r}
+ggplot(price_data) +
+  geom_histogram(aes(x = reviews_per_month), colour = "pink", fill = "red")
+```
+
+
+```{r}
+ggplot(price_data) +
+  geom_point(aes(x = reviews_per_month, y = price)) +
+  geom_smooth(mapping = aes(x = reviews_per_month, y = price),method = 'lm')
+```
+
+Here we clean up a little more the zipcodes because they were some mistakes (probably some typing errors) :
+```{r}
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "7009", "75009")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "75", "75000")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "7517", "75017")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "75 018", "75018")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "750016", "75016")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "75011 PARIS", "75011")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "75014\n75014", "75014")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "75019\n75019", "75019")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "75106", "75006")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "75116", "75016")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "Montmartre", "75018")
+price_data$zipcode <- replace(price_data$zipcode, price_data$zipcode == "Paris 75004", "75004")
+```
+Here we plot the mean price by zipcode ( = "arrondissements"). We can see the first eight "arrondissements" have the highest mean price, probably because those are in the heart of the city :
+```{r}
+price_data %>%
+  filter(zipcode != "Paris" & zipcode != "adf"  & zipcode != "13006" & zipcode != "17200" & zipcode != "700014"
+  &   zipcode != "750109" & zipcode != "75522" & zipcode != "74000" & zipcode != "75522" & zipcode != "79019"
+  & zipcode != "79019" & zipcode != '91330' & zipcode != '92100' & zipcode != '92110' & zipcode != '92120' & zipcode != '92130' & zipcode != '92150' & zipcode != '92170' & zipcode != '92200' & zipcode != '92210' & zipcode != '92240' & zipcode != '92300' & zipcode != '92800' & zipcode != '93100' & zipcode != '93170' & zipcode != '93210' & zipcode != '93260' & zipcode != '92110' & zipcode != '93300' & zipcode != '93310' & zipcode != '93320' & zipcode != '93400' & zipcode != '93500' & zipcode != '94120' & zipcode != '94130' & zipcode != '94160' & zipcode != '94200' & zipcode != '94220' & zipcode != '94230' & zipcode != '94250' & zipcode != '94270' & zipcode != '94300' & zipcode != '94340' & zipcode != '94410' & zipcode != '95000' & zipcode != '95170'  & zipcode != '78008' , is.na(price_data$property_type) == FALSE) %>%
+  select(zipcode, price) %>%
+  group_by(zipcode) %>%
+  mutate(mean_price = mean(price)) %>%
+  ggplot() +
+  geom_point(aes(x = factor(zipcode), y =  mean_price), size = 3, colour = "blue") +
+  theme(axis.text.x=element_text(angle = 90, hjust = 0))
+```
+Then we plot the mean prices according to the property type, we just can see that the "Chalet" and Villa" types are clearly higher, which seems logical:
+```{r}
+price_data  %>%
+  filter(is.na(property_type) == FALSE & property_type != 'Cabin' & property_type != 'Camper/RV' & property_type != 'Cave' & property_type != 'Chaler' & property_type != 'Earth House' & property_type != 'Igloo' & property_type != 'Tent' & property_type != 'Tipi' & property_type != 'Treehouse') %>%
+  select(property_type, price) %>%
+  group_by(property_type) %>%
+  mutate(mean_price = mean(price)) %>%
+  ggplot() +
+  geom_point(aes(x = factor(property_type), y =  mean_price), size = 5, colour = "darkslateblue") +
+  theme(axis.text.x=element_text(angle = 90, hjust = 0))
+```
+Here we compute the numbers of amenities for each apartment, and we plot the price according to that result. It seems the total number of amenities have an effect on the price (which can probably be explained by the fact the larger apartments have more amenities) :
+```{r}
+price_data  %>%
+  filter(is.na(amenities) == FALSE) %>%
+  select(amenities, price) %>%
+  mutate(total_amenities = 1 + str_count(amenities, pattern = ",")) %>%
+  ggplot() +
+  geom_point(aes(x = factor(total_amenities), y =  price), colour = "green4") +
+  theme(axis.text.x=element_text(angle = 90, hjust = 0)) +
+  geom_smooth(mapping = aes(x = total_amenities, y =  price),method = 'lm', colour = "orangered2")
+```
+Here we are joining the data sets "L" and "R" for comparing the renting of the apartments by quarter along time.
+From the first nd second plot we can see the Popincourt and Buttes-Montmartres quarters have the most reservation.
+In the first plot we have a clear trend for having much more reservation in March, April, May and June. It seems the guest are having a preference for visiting Paris in Spring.
+From the second plot we see that the reservation are starting the most on sunday, monday and tuesday, which could be due to reservation during the whole week.
+```{r}
+inner_join(price_data,R,by = c("id" = "listing_id")) %>%
+filter() %>%
+select(id, price, date, neighbourhood_cleansed) %>%
+group_by(neighbourhood_cleansed) %>%
+ggplot() +
+geom_bar(aes(x=factor(months(as.Date(date))))) +
+facet_wrap( ~ factor(neighbourhood_cleansed),nrow = 4) +
+theme(axis.text.x=element_text(angle = 90, hjust = 0))
+
+```
+```{r}
+inner_join(price_data,R,by = c("id" = "listing_id")) %>%
+filter() %>%
+select(id, price, date, neighbourhood_cleansed) %>%
+group_by(neighbourhood_cleansed) %>%
+ggplot() +
+geom_bar(aes(x=factor(weekdays(as.Date(date))))) +
+facet_wrap( ~ factor(neighbourhood_cleansed),nrow = 4) +
+theme(axis.text.x=element_text(angle = 90, hjust = 0))
+```
+And in the end we plot the price according to the number of apartments per owner. It seems to be a relationship between them, perhaps it's because owners with the most apartments are more professionals and make a business of it, then they could tend to have the more lucrative spots:
+```{r}
+price_data %>%
+filter() %>%
+select(host_id,calculated_host_listings_count,price) %>%
+  group_by(calculated_host_listings_count) %>%
+mutate (mean_price = mean(price)) %>%
+ggplot() +
+  geom_point(aes(x = calculated_host_listings_count, y = mean_price)) +
+    geom_smooth(mapping = aes(x = calculated_host_listings_count, y =  mean_price),method = 'lm')
+```
+
